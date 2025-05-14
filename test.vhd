@@ -1,83 +1,90 @@
-module traffic_light_controller (
-    input wire clk,          // 50 MHz clock input
-    input wire reset,        // Reset button
-    output reg [2:0] ns_lights, // North-South lights (Red, Yellow, Green)
-    output reg [2:0] ew_lights  // East-West lights (Red, Yellow, Green)
-);
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
-    typedef enum reg [1:0] {
-        S0 = 2'b00, // NS Green, EW Red
-        S1 = 2'b01, // NS Yellow, EW Red
-        S2 = 2'b10, // NS Red, EW Green
-        S3 = 2'b11  // NS Red, EW Yellow
-    } state_t;
+entity traffic_light_controller is
+    Port (
+        clk       : in STD_LOGIC;  -- 50 MHz clock input
+        reset     : in STD_LOGIC;  -- Reset button
+        ns_lights : out STD_LOGIC_VECTOR(2 downto 0); -- North-South lights (Red, Yellow, Green)
+        ew_lights : out STD_LOGIC_VECTOR(2 downto 0)  -- East-West lights (Red, Yellow, Green)
+    );
+end traffic_light_controller;
 
-    state_t current_state, next_state;
+architecture Behavioral of traffic_light_controller is
+    type state_t is (S0, S1, S2, S3); -- State encoding
+    signal current_state, next_state : state_t;
 
-  
-    reg [25:0] clk_divider = 0; // 26-bit counter for 50 MHz to 1 Hz
-    reg slow_clk = 0;
+    signal clk_divider : STD_LOGIC_VECTOR(25 downto 0) := (others => '0'); -- 26-bit counter for 50 MHz to 1 Hz
+    signal slow_clk    : STD_LOGIC := '0';
 
-    always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            clk_divider <= 0;
-            slow_clk <= 0;
-        end else if (clk_divider == 25_000_000) begin // Toggle every 1 second
-            clk_divider <= 0;
-            slow_clk <= ~slow_clk;
-        end else begin
-            clk_divider <= clk_divider + 1;
-        end
-    end
+    signal timer       : INTEGER range 0 to 15 := 0; -- 4-bit counter for state duration
+begin
 
-    reg [3:0] timer = 0; // 4-bit counter for state duration
+    -- Clock Divider: Generate 1 Hz slow clock from 50 MHz clock
+    process (clk, reset)
+    begin
+        if reset = '1' then
+            clk_divider <= (others => '0');
+            slow_clk <= '0';
+        elsif rising_edge(clk) then
+            if clk_divider = "11000011010100000000000000" then -- 25_000_000 in binary
+                clk_divider <= (others => '0');
+                slow_clk <= not slow_clk;
+            else
+                clk_divider <= clk_divider + 1;
+            end if;
+        end if;
+    end process;
 
-    always @(posedge slow_clk or posedge reset) begin
-        if (reset) begin
+    -- State Transition Process
+    process (slow_clk, reset)
+    begin
+        if reset = '1' then
             timer <= 0;
             current_state <= S0;
-        end else if (timer == 5) begin // 5 seconds for Green, 2 seconds for Yellow
-            timer <= 0;
-            current_state <= next_state;
-        end else begin
-            timer <= timer + 1;
-        end
-    end
+        elsif rising_edge(slow_clk) then
+            if timer = 5 then -- 5 seconds for Green, 2 seconds for Yellow
+                timer <= 0;
+                current_state <= next_state;
+            else
+                timer <= timer + 1;
+            end if;
+        end if;
+    end process;
 
+    -- Next State Logic
+    process (current_state)
+    begin
+        case current_state is
+            when S0 => next_state <= S1; -- NS Green → NS Yellow
+            when S1 => next_state <= S2; -- NS Yellow → EW Green
+            when S2 => next_state <= S3; -- EW Green → EW Yellow
+            when S3 => next_state <= S0; -- EW Yellow → NS Green
+            when others => next_state <= S0;
+        end case;
+    end process;
 
-    always @(*) begin
-        case (current_state)
-            S0: next_state = S1; // NS Green → NS Yellow
-            S1: next_state = S2; // NS Yellow → EW Green
-            S2: next_state = S3; // EW Green → EW Yellow
-            S3: next_state = S0; // EW Yellow → NS Green
-            default: next_state = S0;
-        endcase
-    end
+    -- Output Logic
+    process (current_state)
+    begin
+        case current_state is
+            when S0 => -- NS Green, EW Red
+                ns_lights <= "001"; -- Green
+                ew_lights <= "100"; -- Red
+            when S1 => -- NS Yellow, EW Red
+                ns_lights <= "010"; -- Yellow
+                ew_lights <= "100"; -- Red
+            when S2 => -- NS Red, EW Green
+                ns_lights <= "100"; -- Red
+                ew_lights <= "001"; -- Green
+            when S3 => -- NS Red, EW Yellow
+                ns_lights <= "100"; -- Red
+                ew_lights <= "010"; -- Yellow
+            when others =>
+                ns_lights <= "100"; -- Default to Red
+                ew_lights <= "100"; -- Default to Red
+        end case;
+    end process;
 
-    always @(*) begin
-        case (current_state)
-            S0: begin // NS Green, EW Red
-                ns_lights = 3'b001; // Green
-                ew_lights = 3'b100; // Red
-            end
-            S1: begin // NS Yellow, EW Red
-                ns_lights = 3'b010; // Yellow
-                ew_lights = 3'b100; // Red
-            end
-            S2: begin // NS Red, EW Green
-                ns_lights = 3'b100; // Red
-                ew_lights = 3'b001; // Green
-            end
-            S3: begin // NS Red, EW Yellow
-                ns_lights = 3'b100; // Red
-                ew_lights = 3'b010; // Yellow
-            end
-            default: begin
-                ns_lights = 3'b100; // Default to Red
-                ew_lights = 3'b100; // Default to Red
-            end
-        endcase
-    end
-
-endmodule
+end Behavioral;
